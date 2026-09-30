@@ -1,0 +1,103 @@
+import firebase_admin
+from firebase_admin import credentials, auth
+from google.oauth2 import id_token
+from google.auth.transport import requests
+from core.config import settings
+from loguru import logger
+
+# Initialize Firebase Admin SDK
+try:
+    if not firebase_admin._apps:
+        # Check if we have minimum required keys to init (even dummy ones for dev)
+        if settings.FIREBASE_PROJECT_ID and settings.FIREBASE_CLIENT_EMAIL:
+            # We reconstruct the private key string in case it has escaped newlines
+            private_key = settings.FIREBASE_PRIVATE_KEY.replace('\\n', '\n') if settings.FIREBASE_PRIVATE_KEY else ""
+            
+            cred = credentials.Certificate({
+                "type": "service_account",
+                "project_id": settings.FIREBASE_PROJECT_ID,
+                "private_key_id": settings.FIREBASE_PRIVATE_KEY_ID,
+                "private_key": private_key,
+                "client_email": settings.FIREBASE_CLIENT_EMAIL,
+                "client_id": settings.FIREBASE_CLIENT_ID,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "client_x509_cert_url": settings.FIREBASE_CLIENT_X509_CERT_URL
+            })
+            firebase_admin.initialize_app(cred)
+            logger.info("Firebase Admin initialized successfully.")
+        else:
+            logger.warning("Firebase Admin skipped: missing configuration.")
+except Exception as e:
+    logger.warning(f"Firebase Admin skipped (invalid or missing keys): {e}")
+
+def verify_firebase_token(token: str) -> dict:
+    """
+    Verify Firebase ID token (used for Phone OTP).
+    Returns a dict with user info if successful, raises exception if invalid.
+    """
+    # M7: Explicit guard if Firebase Admin is not configured/initialized on the server
+    if not firebase_admin._apps:
+        raise ValueError("Phone login is not configured on this server (Firebase Admin not initialized).")
+    try:
+        decoded_token = auth.verify_id_token(token)
+        return decoded_token
+    except Exception as e:
+        logger.error(f"Firebase token verification failed: {e}")
+        raise ValueError("Invalid Firebase ID token")
+
+def verify_google_token(token: str) -> dict:
+    """
+    Verify Google OAuth ID token or Firebase Auth ID token (from Firebase Google provider).
+    Returns a dict with user info if successful, raises exception if invalid.
+    """
+    # 1. Try Google OAuth token verification
+    try:
+        audience = settings.GOOGLE_CLIENT_ID.strip() if settings.GOOGLE_CLIENT_ID else None
+        idinfo = id_token.verify_oauth2_token(
+            token, 
+            requests.Request(), 
+            audience=audience
+        )
+        if not idinfo.get("email_verified", False):
+            raise ValueError("Google account email is not verified by Google.")
+        return idinfo
+    except Exception as e_google:
+        # 2. Fallback: If audience check failed because token was issued for an associated project client ID,
+        # verify signature against Google public certs with an explicit allow-list of allowed audiences
+        if settings.GOOGLE_CLIENT_ID and "audience" in str(e_google).lower():
+            try:
+                allowed_audiences = [a for a in (
+                    settings.GOOGLE_CLIENT_ID,
+                    getattr(settings, "FIREBASE_PROJECT_ID", None),
+                ) if a]
+                idinfo = id_token.verify_oauth2_token(
+                    token, requests.Request(), audience=allowed_audiences
+                )
+                issuer = idinfo.get("iss", "")
+                if issuer in ("accounts.google.com", "https://accounts.google.com"):
+                    if not idinfo.get("email_verified", False):
+                        raise ValueError("Google account email is not verified by Google.")
+                    return idinfo
+            except Exception:
+                pass
+
+        # 3. Fallback to Firebase verify_id_token if client authenticated via Firebase
+        if firebase_admin._apps:
+            try:
+                decoded = auth.verify_id_token(token)
+                if not decoded.get("email_verified", False):
+                    raise ValueError("Firebase account email is not verified.")
+                return {
+                    "email": decoded.get("email"),
+                    "sub": decoded.get("uid"),
+                    "name": decoded.get("name"),
+                    "picture": decoded.get("picture"),
+                    "email_verified": True,
+                }
+            except Exception as e_fb:
+                logger.error(f"Google and Firebase token verification failed: {e_google} | {e_fb}")
+                raise ValueError("Invalid Google OAuth or Firebase ID token")
+        raise ValueError(f"Invalid Google OAuth ID token: {e_google}")
+

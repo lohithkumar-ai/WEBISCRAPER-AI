@@ -1,0 +1,85 @@
+import os
+import uuid
+import pandas as pd
+from typing import Dict, Any, List
+from loguru import logger
+from .base import BaseAgent
+from datetime import datetime
+
+# In a real app, this should be configurable
+EXPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "exports")
+os.makedirs(EXPORT_DIR, exist_ok=True)
+
+# C7: Formula injection protection — dangerous leading characters in cells
+_FORMULA_CHARS = ('=', '+', '-', '@', '\t', '\r', '\n')
+
+def sanitize_cell_value(val: Any) -> Any:
+    """C7: Prefix dangerous leading characters with a single quote to prevent formula injection."""
+    if isinstance(val, str) and val and val[0] in _FORMULA_CHARS:
+        return "'" + val
+    return val
+
+class ExportAgent(BaseAgent):
+    def __init__(self):
+        super().__init__(name="ExportAgent")
+        
+    async def _execute(self, input_data: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        dataset = input_data.get("filtered_data", input_data.get("cleaned_data", []))
+        export_format = input_data.get("export_requested", "none").lower()
+        
+        if export_format == "none" or not dataset:
+            input_data["export_url"] = None
+            return input_data
+            
+        logger.info(f"[{session_id}] ExportAgent generating {export_format} for {len(dataset)} items.")
+        
+        export_id = str(uuid.uuid4())
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        owner_prefix = input_data.get("owner_id", "")
+        # H4: Refuse to generate exports without owner_id to prevent permanent 403 download lockout
+        if not owner_prefix:
+            logger.error(f"[{session_id}] Export attempted with no owner_id — refusing to generate an unownable file.")
+            return {**input_data, "export_error": "Missing owner context; export not generated."}
+        base_filename = f"{owner_prefix}_webiscrap_{timestamp}_{export_id[:8]}"
+        file_path = ""
+        download_url = ""
+        
+        valid_formats = {"csv", "excel", "json", "markdown"}
+        if export_format not in valid_formats:
+            logger.warning(f"[{session_id}] Unsupported export format: {export_format}")
+            input_data["export_url"] = None
+            return input_data
+
+        try:
+            df = pd.DataFrame(dataset)
+            # C7 & N10: Sanitize all cell values and headers before export to prevent formula injection
+            df = df.map(sanitize_cell_value)
+            df.columns = [sanitize_cell_value(c) for c in df.columns]
+            
+            # H-07: Use streaming export endpoint rather than relying on ephemeral local disk
+            download_url = f"/api/export/{export_format}?session_id={session_id}"
+            
+            # Optionally write local copy if EXPORT_DIR is writable (for local debugging)
+            try:
+                if export_format == "csv":
+                    df.to_csv(os.path.join(EXPORT_DIR, f"{base_filename}.csv"), index=False)
+                elif export_format == "excel":
+                    df.to_excel(os.path.join(EXPORT_DIR, f"{base_filename}.xlsx"), index=False)
+                elif export_format == "json":
+                    df.to_json(os.path.join(EXPORT_DIR, f"{base_filename}.json"), orient="records", indent=2)
+                elif export_format == "markdown":
+                    with open(os.path.join(EXPORT_DIR, f"{base_filename}.md"), "w", encoding="utf-8") as f:
+                        f.write(df.to_markdown(index=False))
+            except Exception as disk_err:
+                logger.debug(f"Ephemeral disk write bypassed: {disk_err}")
+                
+            logger.info(f"[{session_id}] Export ready via persistent streaming URL: {download_url}")
+            
+        except Exception as e:
+            logger.error(f"[{session_id}] Export generation failed: {str(e)}")
+            download_url = None
+            
+        input_data["export_url"] = download_url
+        return input_data
+
+export_agent = ExportAgent()

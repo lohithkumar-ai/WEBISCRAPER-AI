@@ -1,0 +1,174 @@
+@import "tailwindcss";
+@import "../styles/tokens.css";
+
+@theme {
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-panel: var(--panel);
+  --color-panel-strong: var(--panel-strong);
+  
+  --color-signal-500: var(--signal-500);
+  --color-signal-400: var(--signal-400);
+  --color-signal-300: var(--signal-300);
+  --color-cyan: var(--cyan);
+  --color-cyan-dim: var(--cyan-dim);
+  
+  --color-text-hi: var(--text-hi);
+  --color-text-mid: var(--text-mid);
+  --color-text-dim: var(--text-dim);
+  
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+
+  /* Tokens that components already use but that were never registered (so their utilities generated NO css) */
+  --color-hair: var(--hair);
+  --color-glass-border: var(--glass-border);
+  --color-glass-border-strong: var(--glass-border-strong);
+  --color-primary: var(--signal-400);
+  --color-muted-foreground: var(--text-dim);
+  --color-bg-base: var(--bg-0);
+  --color-border-dim: var(--hair);
+
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-pill: var(--r-pill);
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--glass-border, currentColor);
+  }
+}
+
+html, body {
+  background: var(--bg-0);
+  color: var(--text-hi);
+  font-family: var(--font-body);
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* ── Mobile touch optimizations ────────────────────────────────────────────────────────────────────── */
+/* Remove 300ms tap delay on mobile browsers */
+a, button, [role="button"], label, summary {
+  touch-action: manipulation;
+}
+/* iOS Safari: prevent auto-zoom on focus when font-size < 16px */
+@media (max-width: 767px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
+/* Minimum 44×44px touch targets on mobile */
+@media (max-width: 767px) {
+  button, [role="button"] {
+    min-height: 44px;
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(20, 119, 245, 0.35)); }
+  50% { filter: drop-shadow(0 0 18px rgba(79, 216, 255, 0.55)); }
+}
+
+@keyframes sweep {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(340%); }
+}
+
+@keyframes pulseDot {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+}
+
+/* Entrance animation used by cards (tailwindcss-animate is not installed, so `animate-in` did nothing before) */
+@keyframes wsEnter {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-in { animation: wsEnter 0.45s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-in { animation: none; }
+}
+html { -webkit-text-size-adjust: 100%; }
+
+/* ── Phone / low-power performance ─────────────────────────────────────────────────────────────────────────────────────
+   backdrop-filter blur on every card (9 on the landing page, one per chat block) is the most expensive paint in the app and
+   is invisible over the dark gradient background. Keep it on large screens only, and simplify the fixed background. */
+@media (max-width: 767px) {
+  .glass, .glass-strong {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(16, 22, 36, 0.92);
+  }
+  .glass-strong { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+  .bg-field::after { display: none; }
+  nav.backdrop-blur-md, header.backdrop-blur-md { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(5, 7, 12, 0.94); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .glass-strong { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+/* ── Custom cursor: hide system cursor on desktop (fine pointer = mouse/trackpad only) ──────────────── */
+@media (pointer: fine) {
+  body:not(.no-custom-cursor) { cursor: none; }
+  /* Restore visible text cursor inside text inputs so users know where to click */
+  input, textarea, [contenteditable] { cursor: text; }
+  /* Restore pointer on clickable native elements when custom cursor is active */
+  body:not(.no-custom-cursor) a, 
+  body:not(.no-custom-cursor) button, 
+  body:not(.no-custom-cursor) [role="button"], 
+  body:not(.no-custom-cursor) select, 
+  body:not(.no-custom-cursor) label, 
+  body:not(.no-custom-cursor) summary { cursor: none; }
+}
+
+/* ── Missing animation keyframes ────────────────────────────────────────────────────────────────────── */
+
+/* ProfileModal open animation */
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.94) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* MessageBubble entry animation */
+@keyframes msgSlideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Generic upward reveal (available for future use) */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Generic fade in (available for future use) */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in { animation: none; }
+}
